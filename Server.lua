@@ -1,29 +1,50 @@
 
--- FREE GAMEPASS SYSTEM V3
--- Primeiro jogador = dono permanente
+-- FREE GAMEPASS SYSTEM V5
+-- SERVER / SERVERSCRIPTSERVICE
+-- Desbloqueios virtuais para o dono permanente
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local DataStoreService = game:GetService("DataStoreService")
+local MarketplaceService = game:GetService("MarketplaceService")
 
-local OwnerStore = DataStoreService:GetDataStore(
+-- Mantem o registro de dono da V3
+local ownerStore = DataStoreService:GetDataStore(
     "FreeGamepassPermanentOwnerV1"
 )
 
-local PassStore = DataStoreService:GetDataStore(
+-- Mantem os desbloqueios anteriores
+local passStore = DataStoreService:GetDataStore(
     "FreeGamepassUnlocksV3"
 )
-
-local Remote = Instance.new("RemoteFunction")
-Remote.Name = "FreeGamepassRequest"
-Remote.Parent = ReplicatedStorage
 
 local OWNER_KEY = "PermanentOwner"
 local ownerId = nil
 
-local function getOwner(candidateId)
+local remote = ReplicatedStorage:FindFirstChild(
+    "FreeGamepassRequest"
+)
+
+if not remote then
+    remote = Instance.new("RemoteFunction")
+    remote.Name = "FreeGamepassRequest"
+    remote.Parent = ReplicatedStorage
+end
+
+local function validId(id)
+    return typeof(id) == "number"
+        and id > 0
+        and id % 1 == 0
+        and id < 9007199254740992
+end
+
+local function verifyOwner(candidateId)
+    if ownerId ~= nil then
+        return ownerId == candidateId
+    end
+
     local success, result = pcall(function()
-        return OwnerStore:UpdateAsync(
+        return ownerStore:UpdateAsync(
             OWNER_KEY,
             function(current)
                 if current == nil then
@@ -35,13 +56,13 @@ local function getOwner(candidateId)
         )
     end)
 
-    if success then
-        ownerId = result
-    else
-        warn("Could not verify permanent owner")
+    if not success or not validId(result) then
+        warn("FreeGamepass: erro ao verificar dono")
+        return false
     end
 
-    return success and result == candidateId
+    ownerId = result
+    return ownerId == candidateId
 end
 
 local function grant(player, passId)
@@ -51,48 +72,59 @@ local function grant(player, passId)
     )
 end
 
-Players.PlayerAdded:Connect(function(player)
-    if not getOwner(player.UserId) then
+local function setupPlayer(player)
+    if not verifyOwner(player.UserId) then
+        player:SetAttribute("FreePassOwner", false)
         return
     end
 
     player:SetAttribute("FreePassOwner", true)
 
     local success, saved = pcall(function()
-        return PassStore:GetAsync(
+        return passStore:GetAsync(
             "Passes_" .. tostring(player.UserId)
         )
     end)
 
     if success and typeof(saved) == "table" then
-        for _, passId in ipairs(saved) do
-            if typeof(passId) == "number" then
-                grant(player, passId)
+        for _, id in ipairs(saved) do
+            if validId(id) then
+                grant(player, id)
             end
         end
     end
-end)
+end
 
-Remote.OnServerInvoke = function(player, action, passId)
-    if not getOwner(player.UserId) then
-        return false, "Only the first player can use this"
+Players.PlayerAdded:Connect(setupPlayer)
+
+for _, player in ipairs(Players:GetPlayers()) do
+    task.spawn(setupPlayer, player)
+end
+
+remote.OnServerInvoke = function(player, action, passId)
+    if not verifyOwner(player.UserId) then
+        return false, "Acesso negado."
     end
 
-    if action ~= "grant" then
-        return false, "Invalid action"
+    if action ~= "grant" or not validId(passId) then
+        return false, "Pedido invalido."
     end
 
-    if typeof(passId) ~= "number"
-        or passId <= 0
-        or passId % 1 ~= 0
-        or passId >= 9007199254740992 then
-        return false, "Invalid Gamepass ID"
+    -- Confirma que o ID pertence a uma Gamepass
+    local infoOk, info = pcall(function()
+        return MarketplaceService:GetProductInfo(
+            passId,
+            Enum.InfoType.GamePass
+        )
+    end)
+
+    if not infoOk or not info then
+        return false, "Gamepass nao encontrada."
     end
 
-    grant(player, passId)
-
-    local success = pcall(function()
-        PassStore:UpdateAsync(
+    -- Salva primeiro, concede depois
+    local saved = pcall(function()
+        passStore:UpdateAsync(
             "Passes_" .. tostring(player.UserId),
             function(old)
                 local list =
@@ -110,9 +142,11 @@ Remote.OnServerInvoke = function(player, action, passId)
         )
     end)
 
-    if success then
-        return true, "Free Gamepass activated!"
+    if not saved then
+        return false, "Erro ao salvar. Tente novamente."
     end
 
-    return true, "Activated, but not saved"
+    grant(player, passId)
+
+    return true, "Beneficio virtual registrado: " .. info.Name
 end
