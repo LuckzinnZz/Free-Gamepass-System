@@ -1,55 +1,57 @@
 
--- FREE GAMEPASS SYSTEM V3
--- Client.lua
--- Interface exclusiva do dono permanente
+-- FREE GAMEPASS SYSTEM V4
+-- CLIENT CORRIGIDO
+-- Interface com diagnostico de servidor
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local player = Players.LocalPlayer
-local remote = ReplicatedStorage:WaitForChild(
-    "FreeGamepassRequest", 15
-)
+local playerGui = player:WaitForChild("PlayerGui")
 
-if not remote then
-    warn("Free Gamepass: servidor nao instalado")
-    return
+-- Evita duplicar a interface
+local old = playerGui:FindFirstChild("FreeGamepassSystem")
+
+if old then
+    old:Destroy()
 end
 
-local gui = Instance.new("ScreenGui")
-gui.Name = "FreeGamepassSystem"
-gui.ResetOnSpawn = false
-gui.Parent = player:WaitForChild("PlayerGui")
+local function create(className, properties, parent)
+    local object = Instance.new(className)
 
-local function create(class, props, parent)
-    local obj = Instance.new(class)
-    for key, value in pairs(props) do
-        obj[key] = value
+    for property, value in pairs(properties) do
+        object[property] = value
     end
-    obj.Parent = parent
-    return obj
+
+    object.Parent = parent
+    return object
 end
 
-local button = create("TextButton", {
-    Size = UDim2.fromOffset(140, 45),
+local gui = create("ScreenGui", {
+    Name = "FreeGamepassSystem",
+    ResetOnSpawn = false,
+    DisplayOrder = 50
+}, playerGui)
+
+local openButton = create("TextButton", {
+    Size = UDim2.fromOffset(145, 45),
     Position = UDim2.new(0, 15, 0.5, 0),
-    BackgroundColor3 = Color3.fromRGB(40, 100, 255),
+    BackgroundColor3 = Color3.fromRGB(35, 100, 255),
     Text = "FREE PASSES",
     TextColor3 = Color3.new(1, 1, 1),
-    Font = Enum.Font.GothamBold,
     TextSize = 16,
-    Visible = false
+    Font = Enum.Font.GothamBold
 }, gui)
 
 create("UICorner", {
     CornerRadius = UDim.new(0, 10)
-}, button)
+}, openButton)
 
 local panel = create("Frame", {
-    Size = UDim2.fromOffset(310, 230),
-    Position = UDim2.fromScale(0.5, 0.5),
+    Size = UDim2.fromOffset(310, 255),
     AnchorPoint = Vector2.new(0.5, 0.5),
-    BackgroundColor3 = Color3.fromRGB(30, 32, 38),
+    Position = UDim2.fromScale(0.5, 0.5),
+    BackgroundColor3 = Color3.fromRGB(28, 31, 40),
     Visible = false
 }, gui)
 
@@ -58,22 +60,22 @@ create("UICorner", {
 }, panel)
 
 create("TextLabel", {
-    Size = UDim2.new(1, 0, 0, 55),
+    Size = UDim2.new(1, 0, 0, 50),
     BackgroundTransparency = 1,
-    Text = "FREE GAMEPASS",
+    Text = "FREE GAMEPASS V4",
     TextColor3 = Color3.new(1, 1, 1),
-    TextSize = 21,
+    TextSize = 20,
     Font = Enum.Font.GothamBold
 }, panel)
 
 local input = create("TextBox", {
-    Size = UDim2.new(1, -30, 0, 45),
-    Position = UDim2.fromOffset(15, 65),
-    BackgroundColor3 = Color3.fromRGB(50, 53, 62),
-    PlaceholderText = "Gamepass ID",
+    Size = UDim2.new(1, -30, 0, 44),
+    Position = UDim2.fromOffset(15, 60),
+    BackgroundColor3 = Color3.fromRGB(49, 53, 65),
+    PlaceholderText = "Digite o Gamepass ID",
     Text = "",
     TextColor3 = Color3.new(1, 1, 1),
-    TextSize = 17,
+    TextSize = 16,
     ClearTextOnFocus = false
 }, panel)
 
@@ -81,10 +83,10 @@ create("UICorner", {
     CornerRadius = UDim.new(0, 8)
 }, input)
 
-local free = create("TextButton", {
+local freeButton = create("TextButton", {
     Size = UDim2.new(1, -30, 0, 48),
-    Position = UDim2.fromOffset(15, 125),
-    BackgroundColor3 = Color3.fromRGB(45, 105, 255),
+    Position = UDim2.fromOffset(15, 118),
+    BackgroundColor3 = Color3.fromRGB(40, 105, 255),
     Text = "Free",
     TextColor3 = Color3.new(1, 1, 1),
     TextSize = 22,
@@ -93,61 +95,89 @@ local free = create("TextButton", {
 
 create("UICorner", {
     CornerRadius = UDim.new(0, 9)
-}, free)
+}, freeButton)
 
 local status = create("TextLabel", {
-    Size = UDim2.new(1, -30, 0, 45),
-    Position = UDim2.fromOffset(15, 180),
+    Size = UDim2.new(1, -26, 0, 70),
+    Position = UDim2.fromOffset(13, 174),
     BackgroundTransparency = 1,
-    Text = "Enter a Gamepass ID",
-    TextColor3 = Color3.fromRGB(210, 210, 215),
+    Text = "Verificando servidor...",
+    TextColor3 = Color3.fromRGB(220, 225, 235),
     TextSize = 13,
     TextWrapped = true
 }, panel)
 
-button.MouseButton1Click:Connect(function()
+local remote = nil
+
+local function updateStatus()
+    if not remote then
+        status.Text = "Servidor nao configurado. Instale Server.lua no seu jogo."
+    elseif player:GetAttribute("FreePassOwner") ~= true then
+        status.Text = "Acesso restrito ao primeiro jogador registrado."
+    else
+        status.Text = "Dono confirmado! Digite o Gamepass ID."
+    end
+end
+
+openButton.MouseButton1Click:Connect(function()
     panel.Visible = not panel.Visible
 end)
 
-free.MouseButton1Click:Connect(function()
-    local id = tonumber(input.Text)
+player:GetAttributeChangedSignal(
+    "FreePassOwner"
+):Connect(updateStatus)
 
-    if not id then
-        status.Text = "Invalid Gamepass ID"
+task.spawn(function()
+    local found = ReplicatedStorage:WaitForChild(
+        "FreeGamepassRequest", 10
+    )
+
+    if found and found:IsA("RemoteFunction") then
+        remote = found
+    end
+
+    updateStatus()
+end)
+
+freeButton.MouseButton1Click:Connect(function()
+    if not remote then
+        updateStatus()
         return
     end
 
-    free.Active = false
-    status.Text = "Activating..."
+    if player:GetAttribute("FreePassOwner") ~= true then
+        updateStatus()
+        return
+    end
+
+    local id = tonumber(input.Text)
+
+    if not id or id <= 0 or id % 1 ~= 0 then
+        status.Text = "Gamepass ID invalido."
+        return
+    end
+
+    freeButton.Active = false
+    status.Text = "Ativando..."
 
     local ok, success, message = pcall(function()
         return remote:InvokeServer("grant", id)
     end)
 
-    if ok and success then
-        free.Text = "Activated!"
-        status.Text = message
+    if ok then
+        status.Text = tostring(message)
+        if success then
+            freeButton.Text = "Activated!"
+        end
     else
-        status.Text = ok and tostring(message)
-            or "Connection error"
+        status.Text = "Erro de conexao com o servidor."
     end
 
-    free.Active = true
+    freeButton.Active = true
 end)
 
-local function updateAccess()
-    local allowed =
-        player:GetAttribute("FreePassOwner") == true
+input:GetPropertyChangedSignal("Text"):Connect(function()
+    freeButton.Text = "Free"
+end)
 
-    button.Visible = allowed
-
-    if not allowed then
-        panel.Visible = false
-    end
-end
-
-player:GetAttributeChangedSignal(
-    "FreePassOwner"
-):Connect(updateAccess)
-
-updateAccess()
+updateStatus()
